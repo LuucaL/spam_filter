@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
 Assignment B Designing a Spam Filter
-Autor: <dein Name>
+Luca Lindig
 
-Ausführung (Beispiel):
-    # 1) Daten-Archive liegen in  data/raw/
-    # 2) Virtuelle Umgebung aktivieren (optional)
+Usage for now:
+    # 1) Data archives are located in data/raw/
+    # 2) Activate the virtual environment (optional)
     # 3) python spam_filter.py
 
-Optionen (siehe --help):
-    --raw-dir     Verzeichnis mit *.tar.bz2
-    --mail-dir    Ziel­ordner für entpackte Mails
-    --model-path  Dateiname für das gespeicherte Modell
+Options:
+    --raw-dir     Directory containing *.tar.bz2 archives
+    --mail-dir    Target folder for extracted emails
+    --model-path  Filename for saving the model
 """
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ import re
 import sys
 import tarfile
 import email
+import email.policy 
 
 import joblib
 import pandas as pd
@@ -38,26 +39,25 @@ NUMBER_RE = re.compile(r"\b\d+(?:\.\d+)?\b")
 
 
 def extract_archives(raw_dir: pathlib.Path, target_dir: pathlib.Path) -> None:
-    """Entpackt alle .tar.bz2-Archive aus raw_dir in target_dir (rekursiv)."""
+    """Extracts all .tar.bz2 archives from raw_dir into target_dir (recursively)."""
     target_dir.mkdir(parents=True, exist_ok=True)
     for archive in raw_dir.glob("*.tar.bz2"):
         with tarfile.open(archive, "r:bz2") as tar:
             tar.extractall(target_dir)
-        print(f"✓ entpackt {archive.name}")
+        print(f"✓ extracted {archive.name}")
 
 
 def parse_email(fp: pathlib.Path) -> str:
-    """Liest eine E-Mail-Datei ein und gibt den reinen Textkörper (plain/text) zurück."""
+    """Reads an email file and returns its plain text content."""
     with open(fp, "rb") as f:
         msg = email.message_from_binary_file(f, policy=email.policy.default)
-
     parts: list[str] = []
     for part in msg.walk():
         if part.get_content_type() == "text/plain":
             charset = part.get_content_charset() or "utf-8"
             try:
                 parts.append(part.get_payload(decode=True).decode(charset, errors="ignore"))
-            except LookupError:  # exotischer Zeichensatz
+            except LookupError:  # unknown charset
                 parts.append(part.get_payload(decode=True).decode("utf-8", errors="ignore"))
     return "\n".join(parts)
 
@@ -74,15 +74,15 @@ def clean(text: str) -> str:
 
 
 def build_dataframe(mail_dir: pathlib.Path) -> pd.DataFrame:
-    """Durchläuft mail_dir rekursiv, liest alle Mails und baut einen DataFrame."""
+    """Recursively traverses mail_dir, reads all emails, and builds a DataFrame."""
     records: list[dict[str, str]] = []
     for path in mail_dir.rglob("*"):
         if path.is_file():
             label = "spam" if "spam" in path.parts[-2] else "ham"
             try:
                 raw_txt = parse_email(path)
-            except Exception as exc:             # defekte Mail?
-                print(f"! überspringe {path.name}: {exc}", file=sys.stderr)
+            except Exception as exc:             # skip broken email
+                print(f"! skipping {path.name}: {exc}", file=sys.stderr)
                 continue
             records.append({"path": str(path), "label": label, "text": raw_txt})
     return pd.DataFrame(records)
@@ -92,26 +92,55 @@ def build_dataframe(mail_dir: pathlib.Path) -> pd.DataFrame:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Trainiert einen Spam-Classifier auf dem SpamAssassin-Korpus."
+        description="Trains a spam classifier using the SpamAssassin dataset."
     )
-    parser.add_argument("--raw-dir", default="data/raw", help="Ordner mit *.tar.bz2-Archiven")
-    parser.add_argument("--mail-dir", default="data/mail", help="Zielordner für entpackte Mails")
-    parser.add_argument("--model-path", default="spam_classifier.joblib", help="Ausgabedatei Modell")
-    parser.add_argument("--test-size", type=float, default=0.2, help="Test­daten-Anteil (0-1)")
+    parser.add_argument("--raw-dir", default="data", help="Directory containing *.tar.bz2 archives")
+    parser.add_argument("--mail-dir", default="data/mail", help="Target folder for extracted emails")
+    parser.add_argument("--model-path", default="spam_classifier.joblib", help="Output file for the model")
+    parser.add_argument("--test-size", type=float, default=0.2, help="Proportion of data for testing (0-1)")
     args = parser.parse_args()
 
-    raw_dir  = pathlib.Path(args.raw_dir)
-    mail_dir = pathlib.Path(args.mail_dir)
+    # Determine raw_dir with fallback
+    raw_dir  = pathlib.Path(__file__).parent / args.raw_dir
+    if not raw_dir.exists():
+        possible_raw = pathlib.Path(__file__).parent.parent / args.raw_dir
+        if possible_raw.exists():
+            raw_dir = possible_raw
+        else:
+            possible_raw = pathlib.Path.cwd() / args.raw_dir
+            if possible_raw.exists():
+                raw_dir = possible_raw
 
-    print("1/5  Archive entpacken …")
+    # Determine mail_dir with fallback
+    mail_dir = pathlib.Path(__file__).parent / args.mail_dir
+    if not mail_dir.exists():
+        possible_mail = pathlib.Path(__file__).parent.parent / args.mail_dir
+        if possible_mail.exists():
+            mail_dir = possible_mail
+        else:
+            possible_mail = pathlib.Path.cwd() / args.mail_dir
+            if possible_mail.exists():
+                mail_dir = possible_mail
+
+    if not raw_dir.exists():
+        print(f"! raw_dir {raw_dir} not found. Please check that the directory {args.raw_dir} exists.", file=sys.stderr)
+        sys.exit(1)
+    if not mail_dir.exists():
+        print(f"! mail_dir {mail_dir} not found. Please check that the directory {args.mail_dir} exists.", file=sys.stderr)
+        sys.exit(1)
+
+    print("1/5 Extracting archives …")
     extract_archives(raw_dir, mail_dir)
 
-    print("2/5  DataFrame bauen …")
+    print("2/5 Building DataFrame …")
     df = build_dataframe(mail_dir)
+    if df.empty or "text" not in df.columns:
+        print("! No email data found. Please check that the archive contains emails.", file=sys.stderr)
+        sys.exit(1)
     df["clean"] = df["text"].map(clean)
-    print("\nKlassenverteilung:\n", df["label"].value_counts(), "\n")
+    print("\nClass distribution:\n", df["label"].value_counts(), "\n")
 
-    print("3/5  Train/Test-Split …")
+    print("3/5 Train/Test Split …")
     X_train, X_test, y_train, y_test = train_test_split(
         df["clean"], df["label"],
         test_size=args.test_size,
@@ -119,39 +148,38 @@ def main() -> None:
         random_state=42
     )
 
-    print("4/5  Training + Hyperparameter-Suche …")
+    print("4/5 Training + Hyperparameter Search …")
     pipe = Pipeline([
         ("vect", CountVectorizer(stop_words="english", min_df=5, ngram_range=(1, 2))),
         ("tfidf", TfidfTransformer()),
-        ("clf", LinearSVC())
+        ("clf", LinearSVC(dual=True))
     ])
-
+    # Reduced grid for testing speed
     param_grid = {
-        "vect__min_df":      [3, 5],
-        "vect__ngram_range": [(1, 1), (1, 2)],
-        "tfidf__use_idf":    [True, False],
-        "clf__C":            [0.5, 1.0, 2.0],
+        "vect__min_df": [5],
+        "vect__ngram_range": [(1, 1)],
+        "tfidf__use_idf": [True],
+        "clf__C": [1.0],
     }
-
     search = GridSearchCV(
         pipe,
         param_grid=param_grid,
-        cv=5,
+        cv=3,
         scoring="f1_macro",
         n_jobs=-1,
         verbose=1
     )
     search.fit(X_train, y_train)
-    print("\nBeste Parameter:", search.best_params_, "\n")
+    print("\nBest Parameters:", search.best_params_, "\n")
 
-    print("5/5  Evaluation auf Hold-out …")
+    print("5/5 Evaluation on hold-out set …")
     y_pred = search.predict(X_test)
     print(classification_report(y_test, y_pred, digits=3))
-    print("Konfusionsmatrix:\n", confusion_matrix(y_test, y_pred, labels=["ham", "spam"]), "\n")
+    print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred, labels=["ham", "spam"]), "\n")
 
-    print(f"Modell wird nach {args.model_path} gespeichert …")
+    print(f"Saving model to {args.model_path} …")
     joblib.dump(search.best_estimator_, args.model_path)
-    print("✓ fertig")
+    print("✓ done")
 
 
 if __name__ == "__main__":
