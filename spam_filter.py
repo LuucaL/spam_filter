@@ -63,12 +63,12 @@ def parse_email(fp: pathlib.Path) -> str:
 
 
 def clean(text: str) -> str:
-    """Einfache Vorverarbeitung: Header streichen, kleinschreiben, URLs & Zahlen maskieren, …"""
-    text = text.split("\n\n", 1)[-1]            # Header-Bereich entfernen
+    """Simple preprocessing: remove header, convert to lowercase, mask URLs and numbers, etc."""
+    text = text.split("\n\n", 1)[-1]            # remove header section
     text = html.unescape(text.lower())
     text = URL_RE.sub(" URL ", text)
     text = NUMBER_RE.sub(" NUMBER ", text)
-    text = re.sub(r"[^\w\s]", " ", text)        # Satzzeichen raus
+    text = re.sub(r"[^\w\s]", " ", text)        # remove punctuation
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
