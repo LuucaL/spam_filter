@@ -4,9 +4,9 @@ numpy==1.26.4
 scipy==1.13.0
 pandas==2.2.2
 scikit-learn==1.4.2
-joblib==1.4.2          # optional – sk-learn bringt es eh mit
+joblib==1.4.2          
 
-nltk==3.8.1            # nur falls du im Skript stemmst/stopwords nutzt
+nltk==3.8.1            
 jupyterlab==4.2.0
 matplotlib==3.9.2
 seaborn==0.12.2

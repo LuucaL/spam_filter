@@ -38,8 +38,11 @@ URL_RE    = re.compile(r"https?://\S+|www\.\S+")
 NUMBER_RE = re.compile(r"\b\d+(?:\.\d+)?\b")
 
 
-def extract_archives(raw_dir: pathlib.Path, target_dir: pathlib.Path) -> None:
-    """Extracts all .tar.bz2 archives from raw_dir into target_dir (recursively)."""
+"""
+This function extracts the contents of a .tar.bz2 archive into the specified directory.
+It ensures that all files from the archive are unpacked and available for further processing.
+"""
+def extract_archive(archive_path, extract_to):
     target_dir.mkdir(parents=True, exist_ok=True)
     for archive in raw_dir.glob("*.tar.bz2"):
         with tarfile.open(archive, "r:bz2") as tar:
@@ -47,8 +50,11 @@ def extract_archives(raw_dir: pathlib.Path, target_dir: pathlib.Path) -> None:
         print(f"✓ extracted {archive.name}")
 
 
+"""
+This function parses an email file, removes its headers, and returns the cleaned body text.
+It is used to prepare raw email data for further preprocessing steps.
+"""
 def parse_email(fp: pathlib.Path) -> str:
-    """Reads an email file and returns its plain text content."""
     with open(fp, "rb") as f:
         msg = email.message_from_binary_file(f, policy=email.policy.default)
     parts: list[str] = []
@@ -62,8 +68,11 @@ def parse_email(fp: pathlib.Path) -> str:
     return "\n".join(parts)
 
 
+"""
+This function cleans the email text by converting it to lowercase, removing special characters,
+and replacing URLs and numbers with placeholder tokens. It standardizes the text for model input.
+"""
 def clean(text: str) -> str:
-    """Simple preprocessing: remove header, convert to lowercase, mask URLs and numbers, etc."""
     text = text.split("\n\n", 1)[-1]            # remove header section
     text = html.unescape(text.lower())
     text = URL_RE.sub(" URL ", text)
@@ -73,8 +82,11 @@ def clean(text: str) -> str:
     return text
 
 
+"""
+This function loads all emails from a directory, parses and cleans them, and returns a list of processed emails.
+It automates the data loading and preprocessing pipeline for the dataset.
+"""
 def build_dataframe(mail_dir: pathlib.Path) -> pd.DataFrame:
-    """Recursively traverses mail_dir, reads all emails, and builds a DataFrame."""
     records: list[dict[str, str]] = []
     for path in mail_dir.rglob("*"):
         if path.is_file():
@@ -86,6 +98,53 @@ def build_dataframe(mail_dir: pathlib.Path) -> pd.DataFrame:
                 continue
             records.append({"path": str(path), "label": label, "text": raw_txt})
     return pd.DataFrame(records)
+
+
+"""
+This function builds and returns a machine learning pipeline consisting of a vectorizer,
+TF-IDF transformer, and a Linear SVC classifier. It encapsulates the model architecture.
+"""
+def build_pipeline():
+    pipe = Pipeline([
+        ("vect", CountVectorizer(stop_words="english", min_df=5, ngram_range=(1, 2))),
+        ("tfidf", TfidfTransformer()),
+        ("clf", LinearSVC(dual=True))
+    ])
+    return pipe
+
+
+"""
+This function performs hyperparameter tuning using GridSearchCV on the provided pipeline and data.
+It returns the best estimator found during the search.
+"""
+def tune_hyperparameters(pipeline, X_train, y_train):
+    # Reduced grid for testing speed
+    param_grid = {
+        "vect__min_df": [5],
+        "vect__ngram_range": [(1, 1)],
+        "tfidf__use_idf": [True],
+        "clf__C": [1.0],
+    }
+    search = GridSearchCV(
+        pipeline,
+        param_grid=param_grid,
+        cv=3,
+        scoring="f1_macro",
+        n_jobs=-1,
+        verbose=1
+    )
+    search.fit(X_train, y_train)
+    return search.best_estimator_
+
+
+"""
+This function evaluates the trained model on test data, printing classification reports and confusion matrices.
+It provides insights into the model's performance.
+"""
+def evaluate_model(model, X_test, y_test):
+    y_pred = model.predict(X_test)
+    print(classification_report(y_test, y_pred, digits=3))
+    print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred, labels=["ham", "spam"]), "\n")
 
 
 # ─────────────────────────────────────────── main ───────────────────────────────────────────
@@ -149,36 +208,15 @@ def main() -> None:
     )
 
     print("4/5 Training + Hyperparameter Search …")
-    pipe = Pipeline([
-        ("vect", CountVectorizer(stop_words="english", min_df=5, ngram_range=(1, 2))),
-        ("tfidf", TfidfTransformer()),
-        ("clf", LinearSVC(dual=True))
-    ])
-    # Reduced grid for testing speed
-    param_grid = {
-        "vect__min_df": [5],
-        "vect__ngram_range": [(1, 1)],
-        "tfidf__use_idf": [True],
-        "clf__C": [1.0],
-    }
-    search = GridSearchCV(
-        pipe,
-        param_grid=param_grid,
-        cv=3,
-        scoring="f1_macro",
-        n_jobs=-1,
-        verbose=1
-    )
-    search.fit(X_train, y_train)
-    print("\nBest Parameters:", search.best_params_, "\n")
+    pipeline = build_pipeline()
+    best_model = tune_hyperparameters(pipeline, X_train, y_train)
+    print("\nBest Parameters:", best_model.get_params(), "\n")
 
     print("5/5 Evaluation on hold-out set …")
-    y_pred = search.predict(X_test)
-    print(classification_report(y_test, y_pred, digits=3))
-    print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred, labels=["ham", "spam"]), "\n")
+    evaluate_model(best_model, X_test, y_test)
 
     print(f"Saving model to {args.model_path} …")
-    joblib.dump(search.best_estimator_, args.model_path)
+    joblib.dump(best_model, args.model_path)
     print("✓ done")
 
 
