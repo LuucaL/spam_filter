@@ -22,7 +22,7 @@ spam-filter-project/
 ````
 
 
-# Function Comments for spam_filter.py
+# Function Comments
 
 ---
 

@@ -40,14 +40,13 @@ NUMBER_RE = re.compile(r"\b\d+(?:\.\d+)?\b")
 
 """
 This function extracts the contents of a .tar.bz2 archive into the specified directory.
-It ensures that all files from the archive are unpacked and available for further processing.
+It ensures that all files from the archive are unpacked and available for further processing
 """
 def extract_archive(archive_path, extract_to):
-    target_dir.mkdir(parents=True, exist_ok=True)
-    for archive in raw_dir.glob("*.tar.bz2"):
-        with tarfile.open(archive, "r:bz2") as tar:
-            tar.extractall(target_dir)
-        print(f"✓ extracted {archive.name}")
+    extract_to.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive_path, "r:bz2") as tar:
+        tar.extractall(extract_to)
+    print(f"✓ extracted {archive_path.name}")
 
 
 """
@@ -147,6 +146,47 @@ def evaluate_model(model, X_test, y_test):
     print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred, labels=["ham", "spam"]), "\n")
 
 
+def visualize_evaluation(class_distribution, confusion_matrix, precision, recall, f1, support, accuracy):
+    """
+    Visualizes evaluation results: class distribution, confusion matrix, and prints metrics.
+    - class_distribution: dict or pandas Series with class counts
+    - confusion_matrix: 2D array-like (e.g., [[1330, 61], [12, 468]])
+    - precision, recall, f1, support: dicts or Series with class names as keys
+    - accuracy: float
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    # Class distribution bar plot
+    plt.figure(figsize=(4,3))
+    plt.bar(class_distribution.keys(), class_distribution.values())
+    plt.title("Class Distribution")
+    plt.ylabel("Number of Emails")
+    plt.xlabel("Label")
+    plt.show()
+
+    # Confusion matrix heatmap
+    cm = np.array(confusion_matrix)
+    plt.figure(figsize=(4,3))
+    plt.imshow(cm, interpolation="nearest", cmap="Blues")
+    plt.title("Confusion Matrix")
+    plt.xticks([0, 1], ["Predicted Ham", "Predicted Spam"])
+    plt.yticks([0, 1], ["True Ham", "True Spam"])
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            plt.text(j, i, cm[i, j], ha="center", va="center", color="red")
+    plt.colorbar()
+    plt.tight_layout()
+    plt.show()
+
+    # Print metrics
+    print("Evaluation metrics:")
+    print(f"{'Class':<10} {'Precision':>9} {'Recall':>9} {'F1-score':>9} {'Support':>9}")
+    for label in precision:
+        print(f"{label:<10} {precision[label]:9.3f} {recall[label]:9.3f} {f1[label]:9.3f} {support[label]:9}")
+    print(f"\nAccuracy: {accuracy:.3f}")
+
+
 # ─────────────────────────────────────────── main ───────────────────────────────────────────
 
 def main() -> None:
@@ -189,7 +229,9 @@ def main() -> None:
         sys.exit(1)
 
     print("1/5 Extracting archives …")
-    extract_archives(raw_dir, mail_dir)
+    # Extract all .tar.bz2 archives in raw_dir to mail_dir
+    for archive_path in raw_dir.glob("*.tar.bz2"):
+        extract_archive(archive_path, mail_dir)
 
     print("2/5 Building DataFrame …")
     df = build_dataframe(mail_dir)
